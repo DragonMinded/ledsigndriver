@@ -1,0 +1,1 @@
+Simple python code (including a small toy example) for driving an Alpha Sign which accepts their standard serial format. For more information, see this technical document https://www.alpha-american.com/9708-8061.html

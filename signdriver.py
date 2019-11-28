@@ -1,6 +1,5 @@
 from abc import ABC
 import serial  # type: ignore
-import time
 
 from typing import Dict, Optional, Sequence
 
@@ -475,11 +474,3 @@ if __name__ == "__main__":
             Picture("C"),
         )
         signs[addr] = sign
-
-    while True:
-        for addr in [1, 2]:
-            signs[addr].write_string("B", ":O")
-        time.sleep(0.5)
-        for addr in [1, 2]:
-            signs[addr].write_string("B", ":I")
-        time.sleep(0.5)

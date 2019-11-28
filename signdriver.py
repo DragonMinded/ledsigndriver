@@ -14,7 +14,7 @@ class ConfigurationManager:
     def __enter__(self) -> "ConfigurationManager":
         return self
 
-    def __exit__(self, type, value, traceback) -> None:
+    def __exit__(self, type: object, value: object, traceback: object) -> None:
         if type is None:
             # Success, update config
             self.__sign._send_command(
@@ -29,6 +29,8 @@ class ConfigurationManager:
         """
 
         self.__sign._check_label(label)
+        if label == '0':
+            raise Exception("Cannot use priority label in text configuration!")
         self.__accum[label] = (
             str(label).encode("ascii") +
             b"A" +  # Text mode
@@ -44,6 +46,8 @@ class ConfigurationManager:
         """
 
         self.__sign._check_label(label)
+        if label == '0' or label == "?":
+            raise Exception("Cannot use priority label in string configuration!")
         if size > 125:
             raise Exception("Strings must be 125 bytes or shorter!")
         self.__accum[label] = (
@@ -61,6 +65,8 @@ class ConfigurationManager:
         """
 
         self.__sign._check_label(label)
+        if label == '0':
+            raise Exception("Cannot use priority label in picture configuration!")
         if width > 255 or height > 31:
             raise Exception("Picture size must be at most 31x255!")
         if colors not in {1, 3, 8}:
@@ -90,7 +96,9 @@ class BaseFormat(ABC):
     SUPPORTS_FLASH = 0x1
     SUPPORTS_COLOR = 0x2
 
-    def bytes(self, supportmask: int) -> bytes:
+    children: Sequence["BaseFormat"] = []
+
+    def render(self, supportmask: int) -> bytes:
         ...
 
 
@@ -98,7 +106,7 @@ class Text(BaseFormat):
     def __init__(self, text: str) -> None:
         self.text = text
 
-    def bytes(self, supportmask: int) -> bytes:
+    def render(self, supportmask: int) -> bytes:
         return self.text.encode('ascii')
 
 
@@ -106,19 +114,19 @@ class Small(BaseFormat):
     def __init__(self, *formatting: BaseFormat) -> None:
         self.children = formatting
 
-    def bytes(self, supportmask: int) -> bytes:
-        return bytes([0x1A, 0x31]) + b"".join(c.bytes(supportmask) for c in self.children) + bytes([0x1A, 0x39])
+    def render(self, supportmask: int) -> bytes:
+        return bytes([0x1A, 0x31]) + b"".join(c.render(supportmask) for c in self.children) + bytes([0x1A, 0x39])
 
 
 class Flash(BaseFormat):
     def __init__(self, *formatting: BaseFormat) -> None:
         self.children = formatting
 
-    def bytes(self, supportmask: int) -> bytes:
+    def render(self, supportmask: int) -> bytes:
         if supportmask & self.SUPPORTS_FLASH:
-            return bytes([0x07, 0x31]) + b"".join(c.bytes(supportmask) for c in self.children) + bytes([0x07, 0x30])
+            return bytes([0x07, 0x31]) + b"".join(c.render(supportmask) for c in self.children) + bytes([0x07, 0x30])
         else:
-            return b"".join(c.bytes(supportmask) for c in self.children)
+            return b"".join(c.render(supportmask) for c in self.children)
 
 
 class _Color(BaseFormat, ABC):
@@ -127,11 +135,11 @@ class _Color(BaseFormat, ABC):
         self.code = code
         self.children = formatting
 
-    def bytes(self, supportmask: int) -> bytes:
+    def render(self, supportmask: int) -> bytes:
         if supportmask & self.SUPPORTS_COLOR:
-            return bytes([0x1C, self.code]) + b"".join(c.bytes(supportmask) for c in self.children) + bytes([0x1C, 0x43])
+            return bytes([0x1C, self.code]) + b"".join(c.render(supportmask) for c in self.children) + bytes([0x1C, 0x43])
         else:
-            return b"".join(c.bytes(supportmask) for c in self.children)
+            return b"".join(c.render(supportmask) for c in self.children)
 
 
 class Red(_Color):
@@ -164,7 +172,7 @@ class String(BaseFormat):
         # TODO: Really should validate the label
         self.label = label
 
-    def bytes(self, supportmask: int) -> bytes:
+    def render(self, supportmask: int) -> bytes:
         return bytes([0x10]) + self.label.encode('ascii')
 
 
@@ -173,7 +181,7 @@ class Picture(BaseFormat):
         # TODO: Really should validate the label
         self.label = label
 
-    def bytes(self, supportmask: int) -> bytes:
+    def render(self, supportmask: int) -> bytes:
         return bytes([0x14]) + self.label.encode('ascii')
 
 
@@ -357,7 +365,7 @@ class LEDSign:
             self.ESC +
             b"0" +  # Fill all lines, center vertically
             (mode or self.AUTOMODE) +  # Animation mode
-            b"".join(fobj.bytes(self.__mask) for fobj in formatting)
+            b"".join(fobj.render(self.__mask) for fobj in formatting)
         )
 
     def write_picture(self, label: str, picture: Sequence[Sequence[str]]) -> None:
@@ -367,21 +375,26 @@ class LEDSign:
         for row in picture:
             if len(row) != width:
                 raise Exception("Picture must have identical width for every row!")
-            for val in row:
-                if val.upper() not in {"R", "G", "A", "B"}:
-                    raise Exception(f"Illegal color {val} for picture!")
         self._check_label(label)
 
         def _color_lut(val: str) -> int:
             val = val.upper()
-            if val == "B":
+            if val == "-":
                 return 0x30
             elif val == "R":
                 return 0x31
             elif val == "G":
                 return 0x32
-            else:
+            elif val == "A":
                 return 0x33
+            elif val == "r":
+                return 0x34
+            elif val == "g":
+                return 0x35
+            elif val == "a":
+                return 0x36
+            else:
+                raise Exception(f"Illegal color {val} for picture!")
 
         self._send_command(
             b'I' +
@@ -436,10 +449,10 @@ if __name__ == "__main__":
         sign.write_picture(
             "C",
             [
-                "BBRAGG",
-                "BBRAGG",
-                "BRRAAG",
-                "BRRAAG",
+                "--RAGG",
+                "--RAGG",
+                "-RRAAG",
+                "-RRAAG",
                 "RRRAAA",
                 "RRRAAA",
             ],

@@ -152,6 +152,10 @@ class Flash(BaseFormat):
             return b"".join(c.render(supportmask) for c in self.children)
 
 
+def Newline() -> BaseFormat:
+    return Text("\r")
+
+
 class _Color(BaseFormat, ABC):
 
     def __init__(self, code: int, formatting: Sequence[BaseFormat]) -> None:

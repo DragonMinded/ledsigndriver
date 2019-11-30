@@ -117,6 +117,30 @@ class Small(BaseFormat):
         return bytes([0x1A, 0x31]) + b"".join(c.render(supportmask) for c in self.children) + bytes([0x1A, 0x39])
 
 
+class Fancy(BaseFormat):
+    def __init__(self, *formatting: BaseFormat) -> None:
+        self.children = formatting
+
+    def render(self, supportmask: int) -> bytes:
+        return bytes([0x1A, 0x38]) + b"".join(c.render(supportmask) for c in self.children) + bytes([0x1A, 0x39])
+
+
+class Wide(BaseFormat):
+    def __init__(self, *formatting: BaseFormat) -> None:
+        self.children = formatting
+
+    def render(self, supportmask: int) -> bytes:
+        return bytes([0x12]) + b"".join(c.render(supportmask) for c in self.children) + bytes([0x11])
+
+
+class Fixed(BaseFormat):
+    def __init__(self, *formatting: BaseFormat) -> None:
+        self.children = formatting
+
+    def render(self, supportmask: int) -> bytes:
+        return bytes([0x1E, 0x31]) + b"".join(c.render(supportmask) for c in self.children) + bytes([0x1E, 0x30])
+
+
 class Flash(BaseFormat):
     def __init__(self, *formatting: BaseFormat) -> None:
         self.children = formatting
@@ -146,12 +170,12 @@ class Red(_Color):
         super().__init__(0x31, formatting)
 
 
-class Amber(_Color):
+class Green(_Color):
     def __init__(self, *formatting: BaseFormat) -> None:
         super().__init__(0x32, formatting)
 
 
-class Green(_Color):
+class Amber(_Color):
     def __init__(self, *formatting: BaseFormat) -> None:
         super().__init__(0x33, formatting)
 

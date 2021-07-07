@@ -1,5 +1,6 @@
 from abc import ABC
 import serial  # type: ignore
+import time
 
 from typing import Dict, Optional, Sequence
 from typing_extensions import Final
@@ -227,6 +228,7 @@ class LEDSign:
     PREAMBLE: Final[bytes] = bytes([0x00, 0x00, 0x00, 0x00, 0x00])
     SOH: Final[bytes] = bytes([0x01])
     STX: Final[bytes] = bytes([0x02])
+    ETX: Final[bytes] = bytes([0x03])
     EOT: Final[bytes] = bytes([0x04])
     ESC: Final[bytes] = bytes([0x1B])
 
@@ -262,6 +264,27 @@ class LEDSign:
     WELCOME: Final[bytes] = b"n8"
     SLOT_MACHINE: Final[bytes] = b"n9"
 
+    # Sign types for overriding which sign to talk to, in the case of
+    # updating the sign's address.
+    ONLY_ONE_LINE_SIGNS: Final[bytes] = b"1"
+    ONLY_TWO_LINE_SIGNS: Final[bytes] = b"2"
+    ONLY_430i: Final[bytes] = b"C"
+    ONLY_440i: Final[bytes] = b"D"
+    ONLY_460i: Final[bytes] = b"E"
+    ONLY_790i: Final[bytes] = b"U"
+    ONLY_4120C: Final[bytes] = b"a"
+    ONLY_4160C: Final[bytes] = b"b"
+    ONLY_4200C: Final[bytes] = b"c"
+    ONLY_4240C: Final[bytes] = b"d"
+    ONLY_215R: Final[bytes] = b"e"
+    ONLY_215C: Final[bytes] = b"f"
+    ONLY_4120R: Final[bytes] = b"g"
+    ONLY_4160R: Final[bytes] = b"h"
+    ONLY_4200R: Final[bytes] = b"i"
+    ONLY_4240R: Final[bytes] = b"j"
+    ONLY_4080: Final[bytes] = b"t"
+    ALL_SIGNS: Final[bytes] = b"Z"
+
     def __init__(self, port: str, address: Optional[int], *, supports_flash: bool = False, supports_color: bool = False) -> None:
         """
         Open a serial port similar to /dev/ttyUSB0 and address it with the
@@ -275,7 +298,7 @@ class LEDSign:
             self.__check_address(address)
         self.address = address
 
-        # 9600 9N1
+        # 9600 8N1
         self.__serial = serial.Serial(port, 9600, timeout=1)
 
         # Support mask
@@ -291,11 +314,11 @@ class LEDSign:
             hexbytes = b'0' + hexbytes
         return hexbytes
 
-    def _send_command(self, command: bytes) -> None:
+    def _send_command(self, command: bytes, *, override_sign_types: Optional[bytes] = None) -> None:
         self.__serial.write(
             self.PREAMBLE +
             self.SOH +
-            b'Z' +
+            (override_sign_types if override_sign_types is not None else LEDSign.ALL_SIGNS) +
             self._make_hex(self.address or 0, 2) +
             self.STX +
             command +
@@ -344,6 +367,33 @@ class LEDSign:
     def __make_text(self, text: str) -> bytes:
         return text.encode('ascii')
 
+    def __unmake_text(self, text: bytes) -> str:
+        return text.decode('ascii')
+
+    def read_sign_type(self) -> bytes:
+        """
+        Read a sign and return its type, which can be used in a subsequent
+        `change_address` call as the `override_sign_types` parameter.
+        """
+
+        self._send_command(b"F-")
+        retval = b""
+        old = time.time()
+        while time.time() - old < 5.0:
+            retval = retval + self.__serial.read()
+            if self.PREAMBLE + self.SOH in retval and self.EOT in retval:
+                _, rest = retval.split(self.PREAMBLE + self.SOH, 1)
+                packet, _ = rest.split(self.EOT, 1)
+                original_address, chunk = packet.split(self.STX, 1)
+                if self.ETX in chunk:
+                    response, _crc = chunk.split(self.ETX, 1)
+                else:
+                    response = chunk
+                if response[:2] != b"E-":
+                    raise Exception("Logic error! Got invalid response!")
+                return response[2:3]
+        raise Exception("Failed to read sign type!")
+
     def write_text(self, label: str, text: str, *, mode: Optional[bytes] = None) -> None:
         """
         Write raw text to a label that's been previously configured
@@ -378,7 +428,35 @@ class LEDSign:
             self.__make_text(text)
         )
 
-    def write_format(self, label: str, *formatting: BaseFormat, mode: Optional[bytes] = None) -> None:
+    def read_string(self, label: str) -> str:
+        """
+        Read raw text from a label that's been previously configured
+        as a string.
+        """
+
+        _check_label(label)
+        self._send_command(
+            b'H' +
+            str(label).encode("ascii")
+        )
+        retval = b""
+        old = time.time()
+        while time.time() - old < 5.0:
+            retval = retval + self.__serial.read()
+            if self.PREAMBLE + self.SOH in retval and self.EOT in retval:
+                _, rest = retval.split(self.PREAMBLE + self.SOH, 1)
+                packet, _ = rest.split(self.EOT, 1)
+                original_address, chunk = packet.split(self.STX, 1)
+                if self.ETX in chunk:
+                    response, _crc = chunk.split(self.ETX, 1)
+                else:
+                    response = chunk
+                if response[:2] != (b"G" + str(label).encode("ascii")):
+                    raise Exception("Logic error! Got invalid response!")
+                return self.__unmake_text(response[2:])
+        raise Exception(f"Failed to read string label {label}!")
+
+    def write_format(self, label: str, *formatting: BaseFormat, mode: Optional[bytes] = None, split_animation: bool = False) -> None:
         """
         Write formatted text to a label that's been previously configured
         as text.
@@ -388,13 +466,38 @@ class LEDSign:
             raise Exception("formatting must be at least one character long!")
         _check_label(label)
         self.__check_mode(mode or self.AUTOMODE)
+
+        # Do some shenanigans so we can display full-height photos
+        data = b"".join(fobj.render(self.__mask) for fobj in formatting).split(b"\r")
+        if len(data) == 1 or not split_animation:
+            fixeddata = (
+                self.ESC +
+                b"0" +  # Fill all lines, center vertically
+                (mode or self.AUTOMODE) +  # Animation mode
+                b"\r".join(data)
+            )
+        else:
+            # Split the animation in half
+            total = len(data)
+            top = total // 2
+            fixeddata = (
+                self.ESC +
+                b"\"" +  # Top line only
+                (mode or self.AUTOMODE) +  # Animation mode
+                b"\r".join(data[:top]) +
+                self.ESC +
+                b"&" +  # Bottom line only
+                (mode or self.AUTOMODE) +  # Animation mode
+                b"\r".join(data[top:])
+            )
+
         self._send_command(
             b'A' +
             str(label).encode("ascii") +
             self.ESC +
             b"0" +  # Fill all lines, center vertically
             (mode or self.AUTOMODE) +  # Animation mode
-            b"".join(fobj.render(self.__mask) for fobj in formatting)
+            fixeddata
         )
 
     def write_picture(self, label: str, picture: Sequence[Sequence[str]]) -> None:
@@ -433,7 +536,7 @@ class LEDSign:
             b"".join(bytes(_color_lut(val) for val in row) + b"\r\n" for row in picture)
         )
 
-    def change_address(self, new_address: int) -> None:
+    def change_address(self, new_address: int, *, override_sign_types: Optional[bytes] = None) -> None:
         """
         Change sign address and then use that address.
         """
@@ -442,7 +545,8 @@ class LEDSign:
         self._send_command(
             b'E' +
             b'7' +
-            self._make_hex(new_address, 2)
+            self._make_hex(new_address, 2),
+            override_sign_types=override_sign_types,
         )
         self.address = new_address
 
@@ -465,7 +569,9 @@ class LEDSign:
 if __name__ == "__main__":
     # Simple test program that will drive two signs connected over a RS232/RS485 connection.
     # I wrote this to test against a 4160R (flash support, no color) and a 4120R (no flash, but tricolor).
-    # The 4160 is set to address 1 and 4120 is set to address 2 in this demo program.
+    # The 4160 is set to address 1 and 4120 is set to address 2 in this demo program. In order
+    # to test readback functionality, it will read and print the text in label "B" which should be
+    # ":3" as set by this test program itself.
     for addr in [1, 2]:
         sign = LEDSign("/dev/ttyUSB0", addr, supports_flash=(addr == 1), supports_color=(addr == 2))
         sign.clear_configuration()
@@ -502,3 +608,4 @@ if __name__ == "__main__":
             String("B"),
             Picture("C"),
         )
+        print("Sign B text is", sign.read_string("B"))

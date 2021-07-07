@@ -2,6 +2,15 @@ from abc import ABC
 import serial  # type: ignore
 
 from typing import Dict, Optional, Sequence
+from typing_extensions import Final
+
+
+def _check_label(label: str) -> None:
+    if len(label) != 1:
+        raise Exception("label must be a single character!")
+    val = ord(label)
+    if val < 0x20 or val > 0x7E:
+        raise Exception("label must be a valid ascii character!")
 
 
 class ConfigurationManager:
@@ -27,7 +36,7 @@ class ConfigurationManager:
         maximum length size.
         """
 
-        self.__sign._check_label(label)
+        _check_label(label)
         if label == '0':
             raise Exception("Cannot use priority label in text configuration!")
         self.__accum[label] = (
@@ -44,7 +53,7 @@ class ConfigurationManager:
         maximum length size.
         """
 
-        self.__sign._check_label(label)
+        _check_label(label)
         if label == '0' or label == "?":
             raise Exception("Cannot use priority label in string configuration!")
         if size > 125:
@@ -63,7 +72,7 @@ class ConfigurationManager:
         with width and height specified for the picture.
         """
 
-        self.__sign._check_label(label)
+        _check_label(label)
         if label == '0':
             raise Exception("Cannot use priority label in picture configuration!")
         if width > 255 or height > 31:
@@ -92,8 +101,8 @@ class BaseFormat(ABC):
     Type-only class that all format specifiers subclass from.
     """
 
-    SUPPORTS_FLASH = 0x1
-    SUPPORTS_COLOR = 0x2
+    SUPPORTS_FLASH: Final[int] = 0x1
+    SUPPORTS_COLOR: Final[int] = 0x2
 
     children: Sequence["BaseFormat"] = []
 
@@ -196,7 +205,7 @@ class Mixed(_Color):
 
 class String(BaseFormat):
     def __init__(self, label: str) -> None:
-        # TODO: Really should validate the label
+        _check_label(label)
         self.label = label
 
     def render(self, supportmask: int) -> bytes:
@@ -205,7 +214,7 @@ class String(BaseFormat):
 
 class Picture(BaseFormat):
     def __init__(self, label: str) -> None:
-        # TODO: Really should validate the label
+        _check_label(label)
         self.label = label
 
     def render(self, supportmask: int) -> bytes:
@@ -215,50 +224,50 @@ class Picture(BaseFormat):
 class LEDSign:
 
     # Codes from Sign manual
-    PREAMBLE = bytes([0x00, 0x00, 0x00, 0x00, 0x00])
-    SOH = bytes([0x01])
-    STX = bytes([0x02])
-    EOT = bytes([0x04])
-    ESC = bytes([0x1B])
+    PREAMBLE: Final[bytes] = bytes([0x00, 0x00, 0x00, 0x00, 0x00])
+    SOH: Final[bytes] = bytes([0x01])
+    STX: Final[bytes] = bytes([0x02])
+    EOT: Final[bytes] = bytes([0x04])
+    ESC: Final[bytes] = bytes([0x1B])
 
     # Modes for displaying text
-    ROTATE = b"a"
-    HOLD = b"b"
-    FLASH = b"c"
-    ROLL_UP = b"e"
-    ROLL_DOWN = b"f"
-    ROLL_LEFT = b"g"
-    ROLL_RIGHT = b"h"
-    WIPE_UP = b"i"
-    WIPE_DOWN = b"j"
-    WIPE_LEFT = b"k"
-    WIPE_RIGHT = b"l"
-    SCROLL = b"m"
-    AUTOMODE = b"o"
-    ROLL_IN = b"p"
-    ROLL_OUT = b"q"
-    WIPE_IN = b"r"
-    WIPE_OUT = b"s"
-    COMPRESSED_ROTATE = b"t"
-    EXPLODE = b"u"
-    CLOCK = b"v"
-    TWINKLE = b"n0"
-    SPARKLE = b"n1"
-    SNOW = b"n2"
-    INTERLOCK = b"n3"
-    SWITCH = b"n4"
-    SLIDE = b"n5"
-    SPRAY = b"n6"
-    STARBURST = b"n7"
-    WELCOME = b"n8"
-    SLOT_MACHINE = b"n9"
+    ROTATE: Final[bytes] = b"a"
+    HOLD: Final[bytes] = b"b"
+    FLASH: Final[bytes] = b"c"
+    ROLL_UP: Final[bytes] = b"e"
+    ROLL_DOWN: Final[bytes] = b"f"
+    ROLL_LEFT: Final[bytes] = b"g"
+    ROLL_RIGHT: Final[bytes] = b"h"
+    WIPE_UP: Final[bytes] = b"i"
+    WIPE_DOWN: Final[bytes] = b"j"
+    WIPE_LEFT: Final[bytes] = b"k"
+    WIPE_RIGHT: Final[bytes] = b"l"
+    SCROLL: Final[bytes] = b"m"
+    AUTOMODE: Final[bytes] = b"o"
+    ROLL_IN: Final[bytes] = b"p"
+    ROLL_OUT: Final[bytes] = b"q"
+    WIPE_IN: Final[bytes] = b"r"
+    WIPE_OUT: Final[bytes] = b"s"
+    COMPRESSED_ROTATE: Final[bytes] = b"t"
+    EXPLODE: Final[bytes] = b"u"
+    CLOCK: Final[bytes] = b"v"
+    TWINKLE: Final[bytes] = b"n0"
+    SPARKLE: Final[bytes] = b"n1"
+    SNOW: Final[bytes] = b"n2"
+    INTERLOCK: Final[bytes] = b"n3"
+    SWITCH: Final[bytes] = b"n4"
+    SLIDE: Final[bytes] = b"n5"
+    SPRAY: Final[bytes] = b"n6"
+    STARBURST: Final[bytes] = b"n7"
+    WELCOME: Final[bytes] = b"n8"
+    SLOT_MACHINE: Final[bytes] = b"n9"
 
     def __init__(self, port: str, address: Optional[int], *, supports_flash: bool = False, supports_color: bool = False) -> None:
         """
         Open a serial port similar to /dev/ttyUSB0 and address it with the
         address given. This can be 1-255 inclusive to address a sign that
-        has an address (signs tell you their address on boot), or None to
-        signify a broadcast address (talk to all signs).
+        has an address (signs tell you their address on boot on the sign itself),
+        or None to signify a broadcast address (talk to all signs).
         """
 
         self.port = port
@@ -296,13 +305,6 @@ class LEDSign:
     def __check_address(self, address: int) -> None:
         if address < 1 or address > 255:
             raise Exception("address must be between 1 and 255 inclusive!")
-
-    def _check_label(self, label: str) -> None:
-        if len(label) != 1:
-            raise Exception("label must be a single character!")
-        val = ord(label)
-        if val < 0x20 or val > 0x7E:
-            raise Exception("label must be a valid ascii character!")
 
     def __check_mode(self, mode: bytes) -> None:
         if mode not in {
@@ -350,7 +352,7 @@ class LEDSign:
 
         if len(text) < 1:
             raise Exception("text must be at least one character long!")
-        self._check_label(label)
+        _check_label(label)
         self.__check_mode(mode or self.AUTOMODE)
         self._send_command(
             b'A' +
@@ -369,7 +371,7 @@ class LEDSign:
 
         if len(text) < 1:
             raise Exception("text must be at least one character long!")
-        self._check_label(label)
+        _check_label(label)
         self._send_command(
             b'G' +
             str(label).encode("ascii") +
@@ -384,7 +386,7 @@ class LEDSign:
 
         if len(formatting) < 1:
             raise Exception("formatting must be at least one character long!")
-        self._check_label(label)
+        _check_label(label)
         self.__check_mode(mode or self.AUTOMODE)
         self._send_command(
             b'A' +
@@ -402,7 +404,7 @@ class LEDSign:
         for row in picture:
             if len(row) != width:
                 raise Exception("Picture must have identical width for every row!")
-        self._check_label(label)
+        _check_label(label)
 
         def _color_lut(val: str) -> int:
             val = val.upper()
@@ -464,7 +466,6 @@ if __name__ == "__main__":
     # Simple test program that will drive two signs connected over a RS232/RS485 connection.
     # I wrote this to test against a 4160R (flash support, no color) and a 4120R (no flash, but tricolor).
     # The 4160 is set to address 1 and 4120 is set to address 2 in this demo program.
-    signs = {}
     for addr in [1, 2]:
         sign = LEDSign("/dev/ttyUSB0", addr, supports_flash=(addr == 1), supports_color=(addr == 2))
         sign.clear_configuration()
@@ -501,4 +502,3 @@ if __name__ == "__main__":
             String("B"),
             Picture("C"),
         )
-        signs[addr] = sign
